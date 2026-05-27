@@ -660,6 +660,7 @@ static int Abc_CommandAbc9MulFind3           ( Abc_Frame_t * pAbc, int argc, cha
 static int Abc_CommandAbc9BsFind             ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandAbc9AndCare            ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandAbc9Cuts               ( Abc_Frame_t * pAbc, int argc, char ** argv );
+static int Abc_CommandAbc9DumpCuts           ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandAbc9Divide             ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandAbc9Pipeline           ( Abc_Frame_t * pAbc, int argc, char ** argv );
 static int Abc_CommandAbc9Unpipeline         ( Abc_Frame_t * pAbc, int argc, char ** argv );
@@ -1516,6 +1517,7 @@ void Abc_Init( Abc_Frame_t * pAbc )
     Cmd_CommandAdd( pAbc, "ABC9",         "&bsfind",       Abc_CommandAbc9BsFind,                 0 );    
     Cmd_CommandAdd( pAbc, "ABC9",         "&andcare",      Abc_CommandAbc9AndCare,                0 );   
     Cmd_CommandAdd( pAbc, "ABC9",         "&cuts",         Abc_CommandAbc9Cuts,                   0 );
+    Cmd_CommandAdd( pAbc, "ABC9",         "&dumpcuts",     Abc_CommandAbc9DumpCuts,               0 );
     Cmd_CommandAdd( pAbc, "ABC9",         "&divide",       Abc_CommandAbc9Divide,                 0 );
     Cmd_CommandAdd( pAbc, "ABC9",         "&pipe",         Abc_CommandAbc9Pipeline,               0 );
     Cmd_CommandAdd( pAbc, "ABC9",         "&unpipe",       Abc_CommandAbc9Unpipeline,             0 );
@@ -60427,6 +60429,105 @@ usage:
     Abc_Print( -2, "\t-d     : toggle dumping cuts into a text file [default = %s]\n", fDumpText? "yes": "no" );
     Abc_Print( -2, "\t-v     : toggle printing verbose information [default = %s]\n", fDumpBin? "yes": "no" );
     Abc_Print( -2, "\t-h     : print the command usage\n");
+    return 1;
+}
+
+/**Function*************************************************************
+
+  Synopsis    []
+
+  Description []
+
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+int Abc_CommandAbc9DumpCuts( Abc_Frame_t * pAbc, int argc, char ** argv )
+{
+    extern void Gia_ManDumpCutsAig( Gia_Man_t * pGia, int iNode, int nCutSize, int nCutNum, int fTruth, char * pFolder, int fVerbose );
+    int iNode    = -1;
+    int nCutSize =  8;
+    int nCutNum  =  16;
+    int fTruth   =  1;
+    int fVerbose =  1;
+    int c;
+    char * pFolder = NULL;
+    Extra_UtilGetoptReset();
+    while ( ( c = Extra_UtilGetopt( argc, argv, "KCtvh" ) ) != EOF )
+    {
+        switch ( c )
+        {
+        case 'K':
+            if ( globalUtilOptind >= argc )
+            {
+                Abc_Print( -1, "Command line switch \"-K\" should be followed by an integer.\n" );
+                goto usage_dumpcuts;
+            }
+            nCutSize = atoi(argv[globalUtilOptind]);
+            globalUtilOptind++;
+            break;
+        case 'C':
+            if ( globalUtilOptind >= argc )
+            {
+                Abc_Print( -1, "Command line switch \"-C\" should be followed by an integer.\n" );
+                goto usage_dumpcuts;
+            }
+            nCutNum = atoi(argv[globalUtilOptind]);
+            globalUtilOptind++;
+            if ( nCutNum < 2 || nCutNum > 256 )
+            {
+                Abc_Print( -1, "The number of cuts per node should belong to the range: 2 <= C <= 256.\n" );
+                return 1;
+            }
+            break;
+        case 't':
+            fTruth ^= 1;
+            break;
+        case 'v':
+            fVerbose ^= 1;
+            break;
+        case 'h':
+            goto usage_dumpcuts;
+        default:
+            goto usage_dumpcuts;
+        }
+    }
+    if ( pAbc->pGia == NULL )
+    {
+        Abc_Print( -1, "Abc_CommandAbc9DumpCuts(): There is no AIG.\n" );
+        return 0;
+    }
+    if ( globalUtilOptind < argc )
+    {
+        iNode = atoi(argv[globalUtilOptind]);
+        globalUtilOptind++;
+    }
+    if ( globalUtilOptind < argc )
+        pFolder = argv[globalUtilOptind];
+    if ( iNode < 0 )
+    {
+        Abc_Print( -1, "Abc_CommandAbc9DumpCuts(): Node ID must be specified.\n" );
+        goto usage_dumpcuts;
+    }
+    if ( nCutSize < 2 || nCutSize > 14 )
+    {
+        Abc_Print( -1, "The cut size should belong to the range: 2 <= K <= 14.\n" );
+        return 1;
+    }
+    Gia_ManDumpCutsAig( pAbc->pGia, iNode, nCutSize, nCutNum, fTruth, pFolder, fVerbose );
+    return 0;
+
+usage_dumpcuts:
+    Abc_Print( -2, "usage: &dumpcuts [-KC num] [-tvh] <node_id> [folder]\n" );
+    Abc_Print( -2, "\t         dumps cuts of a node as standalone AIG files (AIGER format)\n" );
+    Abc_Print( -2, "\t <node_id> : ID of the node to dump cuts for\n" );
+    Abc_Print( -2, "\t [folder]  : output directory [default = \"cut_dump\"]\n" );
+    Abc_Print( -2, "\t-K num : max number of cut leaves (2 <= num <= 14) [default = %d]\n", nCutSize );
+    Abc_Print( -2, "\t-C num : max number of cuts per node (2 <= num <= 256) [default = %d]\n", nCutNum );
+    Abc_Print( -2, "\t-t     : toggle truth table computation [default = %s]\n", fTruth? "yes": "no" );
+    Abc_Print( -2, "\t-v     : toggle verbose output [default = %s]\n", fVerbose? "yes": "no" );
+    Abc_Print( -2, "\t-h     : print this help message\n");
     return 1;
 }
 

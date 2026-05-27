@@ -21,6 +21,7 @@
 #include "gia.h"
 #include "misc/util/utilTruth.h"
 #include "misc/vec/vecHsh.h"
+#include <sys/stat.h>
 
 ABC_NAMESPACE_IMPL_START
 
@@ -1564,6 +1565,169 @@ void Gia_ManMatchConesOutput( Gia_Man_t * pBig, Gia_Man_t * pSmall, int nCutNum,
     Gia_ManMatchConesOutputFree( vRes );
     Abc_PrintTime( 1, "Total computation time", Abc_Clock() - clkStart );    
 }
+
+/**Function*************************************************************
+
+  Synopsis    [Duplicate a sub-AIG from a cut: leaves become CIs, root becomes CO.]
+
+  Description [Given root node iRoot and nLeaves leaf objects in pLeaves,
+  builds a standalone Gia_Man_t. The leaves can be any object type
+  (const0, CI, or AND). Complemented edges are preserved.]
+
+  SideEffects []
+
+  SeeAlso     [Gia_ManDupConeSupp]
+
+***********************************************************************/
+static inline void Gia_ManDupFromCut_rec( Gia_Man_t * pNew, Gia_Man_t * p, Gia_Obj_t * pObj, Vec_Int_t * vVisited )
+{
+    int iLit0, iLit1, iObj = Gia_ObjId( p, pObj );
+    int iLit = Gia_ObjCopyArray( p, iObj );
+    if ( iLit >= 0 )
+        return;
+    if ( !Gia_ObjIsAnd(pObj) )
+    {
+        iLit = Gia_ManAppendCi(pNew);
+        Gia_ObjSetCopyArray( p, iObj, iLit );
+        Vec_IntPush( vVisited, iObj );
+        return;
+    }
+    Gia_ManDupFromCut_rec( pNew, p, Gia_ObjFanin0(pObj), vVisited );
+    Gia_ManDupFromCut_rec( pNew, p, Gia_ObjFanin1(pObj), vVisited );
+    iLit0 = Gia_ObjCopyArray( p, Gia_ObjFaninId0(pObj, iObj) );
+    iLit1 = Gia_ObjCopyArray( p, Gia_ObjFaninId1(pObj, iObj) );
+    iLit0 = Abc_LitNotCond( iLit0, Gia_ObjFaninC0(pObj) );
+    iLit1 = Abc_LitNotCond( iLit1, Gia_ObjFaninC1(pObj) );
+    iLit  = Gia_ManAppendAnd( pNew, iLit0, iLit1 );
+    Gia_ObjSetCopyArray( p, iObj, iLit );
+    Vec_IntPush( vVisited, iObj );
+}
+Gia_Man_t * Gia_ManDupFromCut( Gia_Man_t * p, int iRoot, int nLeaves, int * pLeaves )
+{
+    Gia_Man_t * pNew;
+    Gia_Obj_t * pObj;
+    Vec_Int_t * vVisited;
+    int i, iObj, iRootLit;
+
+    assert( nLeaves >= 0 && nLeaves <= GIA_MAX_CUTSIZE );
+    assert( iRoot > 0 );
+    assert( Gia_ObjIsAnd(Gia_ManObj(p, iRoot)) );
+
+    if ( Vec_IntSize(&p->vCopies) < Gia_ManObjNum(p) )
+        Vec_IntFillExtra( &p->vCopies, Gia_ManObjNum(p), -1 );
+
+    pNew = Gia_ManStart( 100 + nLeaves );
+    pNew->pName = Abc_UtilStrsav( p->pName );
+
+    Gia_ObjSetCopyArray( p, 0, 0 );
+
+    vVisited = Vec_IntAlloc( 100 );
+
+    for ( i = 0; i < nLeaves; i++ )
+    {
+        iObj = pLeaves[i];
+        assert( iObj >= 0 && iObj < Gia_ManObjNum(p) );
+        Gia_ObjSetCopyArray( p, iObj, Gia_ManAppendCi(pNew) );
+        Vec_IntPush( vVisited, iObj );
+    }
+
+    pObj = Gia_ManObj( p, iRoot );
+    Gia_ManDupFromCut_rec( pNew, p, pObj, vVisited );
+    iRootLit = Gia_ObjCopyArray( p, iRoot );
+
+    Gia_ManAppendCo( pNew, iRootLit );
+
+    Gia_ObjSetCopyArray( p, 0, -1 );
+    Vec_IntForEachEntry( vVisited, iObj, i )
+        Gia_ObjSetCopyArray( p, iObj, -1 );
+
+    Vec_IntFree( vVisited );
+    return pNew;
+}
+
+/**Function*************************************************************
+
+  Synopsis    [Dump all cuts of a given node as standalone AIG files.]
+
+  Description [Computes cuts for the entire network, then for each cut
+  of the specified node that has nLeaves >= 2, extracts a standalone
+  sub-AIG and writes it as a binary AIGER file.]
+
+  SideEffects []
+
+  SeeAlso     []
+
+***********************************************************************/
+void Gia_ManDumpCutsAig( Gia_Man_t * pGia, int iNode, int nCutSize, int nCutNum, int fTruth, char * pFolder, int fVerbose )
+{
+    Gia_Sto_t * pSto;
+    Vec_Int_t * vLevel;
+    int * pList, * pCut;
+    int i, nCuts, nDumped = 0;
+    char pBuffer[500];
+    const char * pDir = pFolder ? pFolder : "cut_dump";
+
+    if ( iNode < 0 || iNode >= Gia_ManObjNum(pGia) )
+    {
+        printf( "Gia_ManDumpCutsAig(): Node ID %d is out of range [0, %d).\n", iNode, Gia_ManObjNum(pGia) );
+        return;
+    }
+    if ( !Gia_ObjIsAnd(Gia_ManObj(pGia, iNode)) )
+    {
+        printf( "Gia_ManDumpCutsAig(): Node %d is not an AND node.\n", iNode );
+        return;
+    }
+
+#ifdef _WIN32
+    _mkdir( pDir );
+#else
+    mkdir( pDir, 0755 );
+#endif
+
+    pSto = Gia_ManMatchCutsInt( pGia, nCutSize, nCutNum, fTruth, fVerbose );
+
+    vLevel = Vec_WecEntry( pSto->vCuts, iNode );
+    if ( Vec_IntSize(vLevel) == 0 )
+    {
+        printf( "Gia_ManDumpCutsAig(): No cuts found for node %d.\n", iNode );
+        Gia_StoFree( pSto );
+        return;
+    }
+
+    pList = Vec_IntArray( vLevel );
+    nCuts = pList[0];
+
+    if ( fVerbose )
+        printf( "Node %d has %d cuts.\n", iNode, nCuts );
+
+    Sdb_ForEachCut( pList, pCut, i )
+    {
+        Gia_Man_t * pCutAig;
+        if ( pCut[0] < 1 )
+            continue;
+
+        pCutAig = Gia_ManDupFromCut( pGia, iNode, pCut[0], pCut + 1 );
+        if ( pCutAig == NULL )
+            continue;
+
+        sprintf( pBuffer, "%s/node%d_cut%d.aig", pDir, iNode, i );
+
+        Gia_AigerWriteSimple( pCutAig, pBuffer );
+
+        if ( fVerbose )
+            printf( "  Cut %d: %d leaves -> %s (and=%d)\n",
+                    i, pCut[0], pBuffer, Gia_ManAndNum(pCutAig) );
+
+        Gia_ManStop( pCutAig );
+        nDumped++;
+    }
+
+    printf( "Dumped %d cuts for node %d into directory \"%s\".\n",
+            nDumped, iNode, pDir );
+
+    Gia_StoFree( pSto );
+}
+
 
 ////////////////////////////////////////////////////////////////////////
 ///                       END OF FILE                                ///

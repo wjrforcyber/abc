@@ -1285,6 +1285,9 @@ extern void                Gia_DumpAiger( Gia_Man_t * p, char * pFilePrefix, int
 extern Vec_Str_t *         Gia_AigerWriteIntoMemoryStr( Gia_Man_t * p );
 extern Vec_Str_t *         Gia_AigerWriteIntoMemoryStrPart( Gia_Man_t * p, Vec_Int_t * vCis, Vec_Int_t * vAnds, Vec_Int_t * vCos, int nRegs );
 extern void                Gia_AigerWriteSimple( Gia_Man_t * pInit, char * pFileName );
+/*=== giaCut.c ============================================================*/
+extern Gia_Man_t *         Gia_ManDupFromCut( Gia_Man_t * p, int iRoot, int nLeaves, int * pLeaves );
+extern void                Gia_ManDumpCutsAig( Gia_Man_t * pGia, int iNode, int nCutSize, int nCutNum, int fTruth, char * pFolder, int fVerbose );
 /*=== giaBalance.c ===========================================================*/
 extern Gia_Man_t *         Gia_ManBalance( Gia_Man_t * p, int fSimpleAnd, int fStrict, int fVerbose );
 extern Gia_Man_t *         Gia_ManAreaBalance( Gia_Man_t * p, int fSimpleAnd, int nNewNodesMax, int fVerbose, int fVeryVerbose );
